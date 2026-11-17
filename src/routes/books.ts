@@ -1,7 +1,8 @@
 import { Router } from "express";
 
 import { booksStore } from "../store/booksStore";
-import { STATUSES, type Status } from "../types";
+import { STATUSES } from "../types";
+import { isStatus, validateBookInput } from "../validation";
 
 export const booksRouter = Router();
 
@@ -39,6 +40,13 @@ booksRouter.get("/:id", async (request, response) => {
   response.json(book);
 });
 
-function isStatus(value: unknown): value is Status {
-  return typeof value === "string" && STATUSES.includes(value as Status);
-}
+booksRouter.post("/", async (request, response) => {
+  const result = validateBookInput(request.body);
+
+  if (!result.ok) {
+    response.status(400).json({ error: result.error });
+    return;
+  }
+
+  response.status(201).json(await booksStore.create(result.value));
+});
