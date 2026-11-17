@@ -50,3 +50,32 @@ booksRouter.post("/", async (request, response) => {
 
   response.status(201).json(await booksStore.create(result.value));
 });
+
+booksRouter.put("/:id", async (request, response) => {
+  const result = validateBookInput(request.body);
+
+  if (!result.ok) {
+    response.status(400).json({ error: result.error });
+    return;
+  }
+
+  const book = await booksStore.replace(request.params.id, result.value);
+
+  if (book === undefined) {
+    response.status(404).json({ error: "Book not found" });
+    return;
+  }
+
+  response.json(book);
+});
+
+booksRouter.delete("/:id", async (request, response) => {
+  const removed = await booksStore.remove(request.params.id);
+
+  if (!removed) {
+    response.status(404).json({ error: "Book not found" });
+    return;
+  }
+
+  response.status(204).send();
+});

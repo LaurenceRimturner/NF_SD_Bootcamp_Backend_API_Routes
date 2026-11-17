@@ -7,6 +7,7 @@ Zusammenfassung der Erklärungen, Slice für Slice. Jeder Slice endet mit einem 
 | Start | Starter-Code | 7 von 44 |
 | 1 | Router, `q`-Filter, `GET /:id` | 9 von 44 |
 | 2 | Validierung, `express.json()`, `POST` | 31 von 44 |
+| 3 | `PUT`, `DELETE` | 42 von 44 |
 
 ## Der Weg einer Anfrage
 
@@ -97,3 +98,45 @@ response.status(201).json(await booksStore.create(result.value));
 Kaputtes JSON (`{"title": "oops`) lässt `express.json()` einen Fehler werfen. Ohne eigenen Fehler-Handler antwortet Express mit seiner Standardseite (HTML). Das widerspricht dem Vertrag (`{ "error": ... }`) und kann Interna verraten. Die zwei Regeln "invalid JSON" schlagen deshalb noch fehl, bis der Error-Handler in Slice 4 gebaut ist.
 
 **Kurz:** Ein Parser macht aus dem Body ein Objekt, die Validierung prüft jeden Typ einzeln und baut ein neues, sauberes Objekt, und die Route antwortet 400 oder 201.
+
+---
+
+## Slice 3: `PUT` und `DELETE`
+
+### `PUT /:id` (Buch ersetzen)
+
+```ts
+const result = validateBookInput(request.body);
+if (!result.ok) { 400 }
+const book = await booksStore.replace(request.params.id, result.value);
+if (book === undefined) { 404 }
+response.json(book);
+```
+
+- **Dieselbe Validierung wie bei `POST`.** Das war der Grund für die eine gemeinsame Funktion: `PUT` ersetzt alle bearbeitbaren Felder und folgt denselben Regeln. Es gibt keinen zweiten Satz Regeln, der abweichen könnte.
+- **Reihenfolge: erst prüfen (400), dann speichern (404).** Ein ungültiger Body ändert nie etwas. Der Test "invalid status keeps the book" prüft genau das.
+- **Die `id` ändert sich nie.** Der Store setzt `{ id, ...input }` mit der `id` aus der URL. Die Validierung kopiert ohnehin nur bekannte Felder, eine `id` im Body wird also ignoriert.
+- **404 über den Store.** `replace` gibt `undefined` zurück, wenn es die `id` nicht gibt. Die Antwort ist `404 { "error": "Book not found" }`.
+- **Erfolg:** `200` mit dem ersetzten Buch.
+
+### `DELETE /:id`
+
+```ts
+const removed = await booksStore.remove(request.params.id);
+if (!removed) { 404 }
+response.status(204).send();
+```
+
+- `remove` gibt `true` oder `false` zurück, je nachdem, ob etwas gelöscht wurde.
+- **`204 No Content` hat keinen Body.** Darum `send()` statt `json(...)`. Das ist die einzige Ausnahme von "jede Antwort ist JSON".
+- **Zweimal löschen:** Beim zweiten Mal gibt es das Buch nicht mehr, also `404`. Der Test "delete twice" prüft das.
+
+### `PUT` oder `POST`?
+
+`POST /api/books` legt ein neues Buch an, und der Server erzeugt die `id`. `PUT /api/books/:id` ersetzt ein vorhandenes Buch, und die `id` steht im Pfad. Bei `PUT` müssen alle Pflichtfelder (`title`, `author`) wieder mitgeschickt werden, weil das ganze Buch ersetzt wird. Wer nur ein Feld ändern will, braucht `PATCH` (Bonus).
+
+### Noch offen (Slice 4)
+
+Die zwei letzten Regeln ("invalid JSON" bei `POST` und `PUT`) brauchen den Error-Handler.
+
+**Kurz:** `PUT` nutzt dieselbe Validierung wie `POST`, prüft zuerst und speichert danach, `DELETE` antwortet mit `204` ohne Body, und beide machen aus dem Store-Signal "nicht gefunden" ein `404`.
