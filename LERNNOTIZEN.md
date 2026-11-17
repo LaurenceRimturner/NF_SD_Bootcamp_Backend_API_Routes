@@ -8,6 +8,7 @@ Zusammenfassung der Erklärungen, Slice für Slice. Jeder Slice endet mit einem 
 | 1 | Router, `q`-Filter, `GET /:id` | 9 von 44 |
 | 2 | Validierung, `express.json()`, `POST` | 31 von 44 |
 | 3 | `PUT`, `DELETE` | 42 von 44 |
+| 4 | 404-Handler, Error-Handler | 44 von 44 |
 
 ## Der Weg einer Anfrage
 
@@ -140,3 +141,51 @@ response.status(204).send();
 Die zwei letzten Regeln ("invalid JSON" bei `POST` und `PUT`) brauchen den Error-Handler.
 
 **Kurz:** `PUT` nutzt dieselbe Validierung wie `POST`, prüft zuerst und speichert danach, `DELETE` antwortet mit `204` ohne Body, und beide machen aus dem Store-Signal "nicht gefunden" ein `404`.
+
+---
+
+## Slice 4: 404-Handler und Error-Handler
+
+Beide liegen in `src/middleware/errors.ts`. Eine Middleware ist eine Funktion, die jede Anfrage durchläuft. Sie darf antworten oder die Anfrage weitergeben.
+
+### Reihenfolge in `app.ts`
+
+```ts
+app.use(express.json());      // 1. Body lesen
+app.get("/api/health", ...);  // 2. Routen
+app.use("/api/books", booksRouter);
+app.use(notFoundHandler);     // 3. nichts hat gepasst → 404
+app.use(errorHandler);        // 4. ganz am Ende: Fehler auffangen
+```
+
+Express arbeitet von oben nach unten. Der 404-Handler muss nach allen Routen stehen, sonst würde er sie verdecken. Der Error-Handler steht zuletzt, weil er Fehler aller Schritte davor auffängt.
+
+### `notFoundHandler`
+
+Hat keinen Pfad, passt also auf alles, was keine Route beantwortet hat. Antwort: `404 { "error": "Not found" }`. Das gilt auch für eine unbekannte Methode auf einem bekannten Pfad (zum Beispiel `PATCH /api/books`).
+
+### `errorHandler`: vier Parameter
+
+```ts
+(error, _request, response, next) => ...
+```
+
+Express erkennt einen Error-Handler **nur an den vier Parametern**. Auch wenn `_next` nicht gebraucht wird, darf er nicht entfernt werden, sonst ist es eine normale Middleware und fängt keine Fehler.
+
+Er wird aufgerufen, wenn etwas einen Fehler wirft: der JSON-Parser, eine Route oder ein `async`-Handler. In Express 5 gehen Fehler aus `async`-Handlern automatisch hierhin, deshalb gibt es in den Routen kein `try`/`catch`.
+
+Was er tut:
+
+1. **`response.headersSent`:** Wurde schon (teilweise) geantwortet, kann man keine neue Antwort mehr senden. Dann gibt er den Fehler mit `next(error)` an Express weiter.
+2. **Kaputtes JSON:** `express.json()` wirft einen Fehler mit `type === "entity.parse.failed"`. Daraus wird `400 { "error": "Body must be valid JSON" }`. Das ist ein Fehler des Clients, also 4xx.
+3. **Alles andere:** `500 { "error": "Internal server error" }`. Der Client bekommt nur eine allgemeine Meldung, **nie** einen Stack-Trace oder interne Details. Der echte Fehler wird mit `console.error(error)` im Server-Log festgehalten, damit man ihn finden kann.
+
+### Warum `unknown` und kein `any`
+
+Ein gefangener Fehler kann alles sein. `isJsonParseError(error: unknown)` prüft Schritt für Schritt (`typeof`, `!== null`, `"type" in error`), bevor es `error.type` liest.
+
+### Beobachtung
+
+Eine Anfrage mit dem Body `null` wird schon vom JSON-Parser abgelehnt (der Standardmodus erlaubt nur Objekte und Listen auf oberster Ebene). Sie endet daher im Error-Handler mit "Body must be valid JSON". Ein Aufruf ganz ohne Body erreicht dagegen die Validierung und bekommt "Body must be a JSON object". Beides ist ein sauberes 400 ohne Absturz.
+
+**Kurz:** Der 404-Handler fängt unbekannte Routen, der Error-Handler (vier Parameter) macht aus jedem Fehler ein JSON-`{ "error": ... }` ohne Interna, und beide stehen ganz am Ende von `app.ts`.

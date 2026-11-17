@@ -1,5 +1,6 @@
 import express from "express";
 
+import { errorHandler, notFoundHandler } from "./middleware/errors";
 import { booksRouter } from "./routes/books";
 
 export const app = express();
@@ -12,6 +13,5 @@ app.get("/api/health", (_request, response) => {
 
 app.use("/api/books", booksRouter);
 
-app.use((_request, response) => {
-  response.status(404).json({ error: "Not found" });
-});
+app.use(notFoundHandler);
+app.use(errorHandler);
