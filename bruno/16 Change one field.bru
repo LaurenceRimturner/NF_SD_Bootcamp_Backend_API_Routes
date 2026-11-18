@@ -1,0 +1,22 @@
+meta {
+  name: Change one field
+  type: http
+  seq: 16
+}
+
+patch {
+  url: {{baseUrl}}/api/books/b1
+  body: json
+  auth: none
+}
+
+body:json {
+  {
+    "status": "reading"
+  }
+}
+
+assert {
+  res.status: eq 200
+  res.body.status: eq reading
+}

@@ -1,0 +1,16 @@
+meta {
+  name: Sorted page of books
+  type: http
+  seq: 14
+}
+
+get {
+  url: {{baseUrl}}/api/books?sort=title&limit=3&offset=1
+  body: none
+  auth: none
+}
+
+assert {
+  res.status: eq 200
+  res.body.length: lte 3
+}

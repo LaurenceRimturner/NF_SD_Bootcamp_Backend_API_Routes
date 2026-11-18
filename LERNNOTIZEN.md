@@ -286,6 +286,144 @@ In Express 5 gehen Fehler aus `async`-Handlern automatisch hierhin. Darum gibt e
 
 ---
 
+## Bonus: Sortieren und Paging
+
+`GET /api/books?sort=title&limit=10&offset=20`
+
+- `sort`: nur `title` (ohne Beachtung von Groß- und Kleinschreibung). Ohne `sort` bleibt die Reihenfolge des Stores.
+- `limit`: ganze Zahl von 1 bis 100. Ohne `limit` kommen alle Bücher.
+- `offset`: ganze Zahl ab 0, Standard 0. Ein `offset` hinter dem Ende gibt `200 []`, keinen Fehler.
+- Ungültig (`?limit=abc`, `-1`, `1.5`, `1e2`, `?limit=1&limit=2`, `?sort=author`) ist ein `400`.
+
+Das `BooksStore`-Interface darf sich nicht ändern. Darum sortiert und schneidet die **Route** das Ergebnis von `booksStore.list(...)`. Die Prüfung steht in `validateListOptions` (`src/validation.ts`).
+
+### Warum nur Ziffern?
+Query-Werte sind immer Text. `Number("abc")` ist `NaN`, `Number("1e2")` ist `100`, `Number("")` ist `0`. Darum prüft `toWholeNumber` mit `/^\d{1,9}$/`, bevor es umwandelt.
+
+**Merksatz:** *Query-Werte sind Text. Erst prüfen, dann in eine Zahl umwandeln, nie umgekehrt.*
+
+Bei einer Datenbank würde man `ORDER BY`, `LIMIT` und `OFFSET` im Store ausführen, sonst wird jedes Mal die ganze Liste geladen.
+
+## Bonus: PATCH
+
+`PATCH /api/books/:id` ändert nur die Felder im Body, zum Beispiel `{ "status": "done" }`.
+
+| | `PUT` | `PATCH` |
+| - | ----- | ------- |
+| Body | alle Pflichtfelder (`title`, `author`) | nur das, was sich ändert |
+| Fehlende Felder | werden auf den Standard gesetzt | bleiben, wie sie sind |
+| Leerer Body | `400` (`title` fehlt) | `400` (mindestens ein Feld nötig) |
+| Erfolg | 200 | 200 |
+| Unbekannte `id` | 404 | 404 |
+
+- **Dieselben Regeln wie `PUT`.** Jedes Feld hat eine eigene Prüfung (`titleError`, `statusError`, ...), die `POST`, `PUT` und `PATCH` teilen. So laufen die Regeln nicht auseinander.
+- **Nur vorhandene Felder.** `rating: null` ist erlaubt und löscht die Bewertung. `status: null` ist ungültig.
+- **Ablauf:** prüfen (400), `booksStore.get` (404), zusammenführen, `booksStore.replace`. Die Route redet weiter nur mit dem Store.
+- **Ein Nachteil:** `get` und `replace` sind zwei Schritte. Im Speicher ist das sicher, bei einer Datenbank könnten zwei Anfragen sich überschreiben. Dann bräuchte der Store eine eigene `patch`-Funktion.
+
+### Wann ist PATCH besser als PUT?
+- Der Client ändert **ein Feld** (Buch als gelesen markieren) und kennt den Rest nicht oder will ihn nicht schicken.
+- Ein **veralteter Stand** soll keine Felder überschreiben, die jemand anderes inzwischen geändert hat. `PUT` schickt alles zurück.
+- Große Objekte: weniger Daten pro Anfrage.
+
+`PUT` ist besser, wenn der Client das **ganze Buch** hat und es bewusst ersetzen will (ein Formular "Speichern").
+
+**Merksatz:** *PUT ersetzt alles, PATCH ändert nur, was im Body steht.*
+
+---
+
+## Bonus: CORS
+
+### Das Problem
+Die React-App läuft auf `http://localhost:3000`, die API auf `http://localhost:3001`. Für den Browser sind das zwei verschiedene **Origins** (Protokoll + Host + Port). Ruft die Seite die andere Origin auf, liest der Browser die Antwort nur, wenn der Server es mit dem Header `Access-Control-Allow-Origin` erlaubt. Sonst steht in der Konsole "blocked by CORS policy", obwohl der Server mit 200 geantwortet hat.
+
+### Die Lösung (`src/app.ts`)
+```ts
+app.use(cors({ origin: "http://localhost:3000" }));   // zuerst
+app.use(express.json());
+```
+`cors()` ohne Optionen würde **jede** Origin erlauben. Darum steht die Origin der React-App fest dabei. Nur das Paket `cors` (und `@types/cors`) kam neu dazu.
+
+### Der Preflight
+Ein `POST`, `PUT`, `PATCH` oder `DELETE` mit `Content-Type: application/json` ist keine "einfache" Anfrage. Der Browser schickt vorher eine `OPTIONS`-Anfrage und fragt: "Darf diese Origin diese Methode mit diesem Header benutzen?" Der Server antwortet `204` mit `Access-Control-Allow-Methods` und `Access-Control-Allow-Headers`. Erst danach sendet der Browser die eigentliche Anfrage.
+
+Ein einfaches `GET` braucht keinen Preflight.
+
+### Was CORS nicht ist
+- Der Server schickt bei einer festen Origin an **jeden** Aufrufer denselben `Access-Control-Allow-Origin: http://localhost:3000`. Er lehnt keinen ab. Der **Browser** vergleicht den Header mit der eigenen Origin und blockiert die fremde Seite.
+- `curl` oder ein anderer Server ignoriert CORS. Es ist **kein Schutz** der API, nur eine Regel für Browser.
+
+**Merksatz:** *CORS erlaubt dem Browser, die Antwort einer anderen Origin zu lesen. Die Origin der eigenen App eintragen, nie alle.*
+
+---
+
+## Bonus: React-Client
+
+Die App in `client/` nutzt jetzt die API statt `localStorage`.
+
+| Datei | Aufgabe |
+| ----- | ------- |
+| `client/src/api.ts` | **alle** `fetch`-Aufrufe: `listBooks`, `createBook`, `replaceBook` (PUT), `deleteBook` |
+| `client/src/useBooks.ts` | Zustand: `books`, `loading`, `error`, Status-Filter. Lädt neu, wenn sich Filter oder Server ändern |
+| `client/src/App.tsx` | zeigt nur an und ruft die Funktionen des Hooks auf |
+
+- **Fehlermeldungen:** `api.ts` wirft immer einen `Error` mit Text. Ist die Antwort nicht in Ordnung, ist der Text das `error` der API (`"title must be a non-empty text"`). Ist der Server nicht erreichbar, schlägt `fetch` selbst fehl (`TypeError`), und der Text lautet "Cannot reach the server …". Ist der Body kein `{ "error": ... }`, steht dort "Request failed (502)".
+- **`fetch` wirft nicht bei 404 oder 400.** Nur bei Netzwerkfehlern. Darum prüft `send` selbst `response.ok`.
+- **Nach jeder Änderung neu laden.** Der Hook zählt `version` hoch, der Effekt lädt die Liste vom Server. So zeigt die App den Stand des Servers, nicht eine Vermutung.
+- **Veraltete Antworten:** wechselt der Filter, während noch geladen wird, ignoriert der Effekt die alte Antwort (`ignore`-Flag im Cleanup).
+- **`PUT` braucht alle Felder.** "Als gelesen markieren" holt darum das Buch aus der Liste und schickt es mit `status: "done"` zurück. Mit `PATCH` wäre ein Feld genug.
+- **Tests rufen nie den echten Server.** `api.test.ts` ersetzt `fetch`, `useBooks.test.ts` und `App.test.tsx` ersetzen das ganze Modul `./api` (`vi.mock`).
+
+**Merksatz:** *`fetch` meldet nur kaputte Verbindungen als Fehler. Einen 4xx oder 5xx muss man selbst an `response.ok` erkennen.*
+
+---
+
+## Bonus: Namen und Statuscodes
+
+Eine Regel für alle Fälle:
+
+| Code | Wann |
+| ---- | ---- |
+| 200 | gelesen oder geändert, Antwort mit Body |
+| 201 | neu angelegt |
+| 204 | geklappt, kein Body nötig (löschen) |
+| 400 | Die Eingabe ist **für sich allein** ungültig (Form, Typ, Wertebereich) |
+| 404 | Das Ziel (Buch oder Route) **gibt es nicht** |
+| 409 | Die Eingabe ist gültig, **passt aber nicht zum Stand der Daten** |
+| 500 | Fehler im Server |
+
+Die Pfade sind Nomen im Plural (`/api/books`), die Aktion steht in der Methode, nicht im Pfad. Darum **kein** `POST /api/books/42/finish`.
+
+### A. Der Leser markiert ein Buch als gelesen
+- **`PATCH /api/books/:id`** mit `{ "status": "done" }`, Erfolg **200** mit dem Buch.
+- Fehler: **404** (unbekannte `id`), **400** (z. B. `"status": "finished"`).
+- Grund: Es ändert **ein Feld** eines vorhandenen Buchs. Das ist genau der Fall von `PATCH` (gebaut). `PUT` ginge auch, müsste aber alle Felder schicken.
+
+### B. Der Leser fügt ein Buch hinzu, das schon in der Liste steht (gleicher Titel und Autor)
+- **`POST /api/books`**, Erfolg **201**.
+- Fehler: **409** `{ "error": "Book already on the list" }`. Bei fehlendem Titel weiter **400**.
+- Grund: Der Body ist gültig (also nicht 400), aber er steht im Konflikt mit dem Stand der Daten. Genau dafür ist 409 da.
+- Noch nicht gebaut. Der Store hat keine Suche nach Titel und Autor, und sein Interface darf sich nicht ändern. Die Route könnte `list({ q })` aufrufen und den Autor vergleichen, aber zwei gleichzeitige Anfragen könnten sich überholen. In einer Datenbank löst das ein `UNIQUE`-Index.
+
+### C. Der Leser sucht Bücher nach Autor
+- **`GET /api/books?author=herbert`**, Erfolg **200** mit einer Liste.
+- Fehler: **400**, wenn `author` kein einzelner Text ist (`?author=a&author=b`). Kein Treffer ist **200 mit `[]`**, kein 404.
+- Grund: Filter gehören in die Query, wie `status` und `q`. Die Sammlung `/api/books` gibt es ja, sie ist nur leer.
+
+### D. Der Client löscht ein Buch, das schon gelöscht ist
+- **`DELETE /api/books/:id`**, beim zweiten Mal **404** `{ "error": "Book not found" }`.
+- Grund: Dieselbe Regel wie bei `GET` und `PUT`: Gibt es das Ziel nicht, ist es 404. So erfährt der Client, dass nichts gelöscht wurde (zum Beispiel ein Tippfehler in der `id`).
+- Die Gegenmeinung: `204` jedes Mal, weil das **Ergebnis** gleich ist (das Buch ist weg). Beide Wege sind in Ordnung, wichtig ist, dass man **eine** Regel wählt. Dieses Projekt hat sie im Vertrag festgelegt: 404.
+
+### E. Der Client sendet ein `rating` von 7
+- **`POST`, `PUT` oder `PATCH`**, Antwort **400** `{ "error": "rating must be null or an integer from 1 to 5" }`.
+- Grund: Der Wert ist ungültig, egal wie der Stand der Daten ist. Das ist die Definition von 400.
+- Warum nicht **422**? Das ginge auch ("die Syntax stimmt, der Inhalt nicht"). Der Vertrag nutzt aber für jede ungültige Eingabe 400. Eine Regel ist besser als zwei, die man unterscheiden muss.
+
+**Merksatz:** *400: die Eingabe ist falsch. 404: das Ziel fehlt. 409: die Eingabe ist richtig, aber der Stand der Daten verbietet sie.*
+
+---
+
 ## Spickzettel: alle Merksätze
 
 1. GET liest, POST legt neu an, PUT ersetzt, DELETE löscht.
@@ -340,7 +478,15 @@ Versuche zuerst, selbst zu antworten. Die Antworten stehen unten.
 
 ## Was noch fehlt (optional)
 
-- **Nicht jeder 4xx-Fehler wird als 4xx gesendet.** Ein Body über 100 KB oder eine kaputte URL würde als 500 statt als 4xx beantwortet. Für die Aufgabe ist das nicht nötig.
-- **Keine eigenen Unit-Tests für `validation.ts`.** Das ist der Bonus mit Vitest.
-- **Bonus-Aufgaben:** CORS und React-Client, Sortieren und Paging (`?sort=`, `?limit=`, `?offset=`), `PATCH`.
+- **Review: was `npm run check` nicht gefunden hat.** Ein Body über 100 KB (`POST` mit 200 KB) und eine kaputte URL (`/api/books/%E0%A4%A`) wurden mit 500 beantwortet, obwohl der Client schuld ist. Das Script prüft nur den Vertrag, nicht diese Fälle. Behoben im `errorHandler`: Fehler mit 4xx-`status` werden als 413 bzw. 400 mit allgemeiner Meldung gesendet, alles andere bleibt 500.
+  **Merksatz:** *Ein Check-Script findet nur, woran der Autor gedacht hat. Eigene Fälle ausprobieren (zu groß, kaputt, fremd).*
+- **Unit-Tests für `validation.ts`** stehen in `src/validation.test.ts` (51 Tests, Vitest). Was sie **nicht** abdecken:
+  - **Keine Höchstlänge.** `title`, `author` und `notes` dürfen beliebig lang sein (bis zum Body-Limit von 100 KB). Dafür gibt es keine Regel, also auch keinen Test. Das ist eine echte Lücke der Validierung.
+  - **Unicode-Leerzeichen** (geschütztes Leerzeichen, Zeichen ohne Breite): `trim()` entfernt manche, andere nicht.
+  - **Ein Body mit dem Schlüssel `__proto__`.** Vermutlich harmlos, weil die Felder einzeln nach Namen kopiert werden, aber nicht getestet.
+  - **Doppelte Bücher** (gleicher Titel und Autor) sind erlaubt.
+
+  **Merksatz:** *Ein Test prüft nur, woran der Autor gedacht hat. Die Lücken stehen dort, wo es auch keine Regel gibt.*
+- **Bonus-Aufgaben:** CORS, React-Client, Sortieren, Paging und `PATCH` sind gebaut (siehe oben). Der Client wurde noch nicht von Hand im Browser ausprobiert.
+- **409 für doppelte Bücher** steht nur als Idee in "Namen und Statuscodes", gebaut ist es nicht.
 - **Daten gehen beim Neustart verloren**, weil sie nur im Arbeitsspeicher liegen. Eine Datenbank würde das lösen, und genau dafür gibt es das `BooksStore`-Interface.
