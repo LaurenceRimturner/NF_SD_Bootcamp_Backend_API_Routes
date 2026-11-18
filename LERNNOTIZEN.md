@@ -340,7 +340,8 @@ Versuche zuerst, selbst zu antworten. Die Antworten stehen unten.
 
 ## Was noch fehlt (optional)
 
-- **Nicht jeder 4xx-Fehler wird als 4xx gesendet.** Ein Body über 100 KB oder eine kaputte URL würde als 500 statt als 4xx beantwortet. Für die Aufgabe ist das nicht nötig.
+- **Review: was `npm run check` nicht gefunden hat.** Ein Body über 100 KB (`POST` mit 200 KB) und eine kaputte URL (`/api/books/%E0%A4%A`) wurden mit 500 beantwortet, obwohl der Client schuld ist. Das Script prüft nur den Vertrag, nicht diese Fälle. Behoben im `errorHandler`: Fehler mit 4xx-`status` werden als 413 bzw. 400 mit allgemeiner Meldung gesendet, alles andere bleibt 500.
+  **Merksatz:** *Ein Check-Script findet nur, woran der Autor gedacht hat. Eigene Fälle ausprobieren (zu groß, kaputt, fremd).*
 - **Keine eigenen Unit-Tests für `validation.ts`.** Das ist der Bonus mit Vitest.
 - **Bonus-Aufgaben:** CORS und React-Client, Sortieren und Paging (`?sort=`, `?limit=`, `?offset=`), `PATCH`.
 - **Daten gehen beim Neustart verloren**, weil sie nur im Arbeitsspeicher liegen. Eine Datenbank würde das lösen, und genau dafür gibt es das `BooksStore`-Interface.
