@@ -424,6 +424,124 @@ Die Pfade sind Nomen im Plural (`/api/books`), die Aktion steht in der Methode, 
 
 ---
 
+## Eine Anfrage live: `POST /api/books`
+
+Alle Antworten unten sind echte Antworten des laufenden Servers.
+
+### Die Adresse und woher die Daten kommen
+
+```
+http://localhost:3001 /api/books /b1 ?status=done&q=dune
+└── Server + Port ──┘ └─ Pfad ─────┘ └──── Query ─────┘
+```
+
+Daten kommen an **drei Stellen** an:
+
+| Ort | Im Code | Wofür | Beispiel |
+| --- | ------- | ----- | -------- |
+| Pfad | `request.params` | **welches** Buch | `/api/books/b1` gibt `params.id = "b1"` |
+| Query | `request.query` | Filter und Optionen beim **Lesen** | `?status=done&limit=10` |
+| Body | `request.body` | die **Daten selbst** beim Anlegen oder Ändern | `{ "title": "Dune", ... }` |
+
+**Merkhilfe:** *Pfad = welches, Query = wie anzeigen, Body = was speichern.*
+
+| Route | Pfad | Query | Body |
+| ----- | :--: | :---: | :--: |
+| `GET /api/books` | | `status`, `q`, `sort`, `limit`, `offset` | |
+| `GET /api/books/:id` | `id` | | |
+| `POST /api/books` | | | alle Felder |
+| `PUT /api/books/:id` | `id` | | alle Felder |
+| `PATCH /api/books/:id` | `id` | | einzelne Felder |
+| `DELETE /api/books/:id` | `id` | | |
+
+Alle drei Stellen sind **unsicher**:
+- Query-Werte sind immer Text (oder eine Liste bei `?a=1&a=2`). Darum erst prüfen, dann in eine Zahl umwandeln.
+- Der Body kann alles sein: Text, Zahl, `null`, eine Liste. Darum zuerst "ist es ein Objekt?", dann jedes Feld einzeln.
+- Die `id` im Pfad wird nicht eigens geprüft. Der Store sucht sie, und findet er nichts, ist es ein 404.
+
+### Der Weg einer Anfrage durch den Code
+
+```
+curl → app.ts → express.json() → booksRouter.post("/") → validateBookInput → booksStore.create → Antwort
+```
+
+1. **`app.ts`:** `app.use("/api/books", booksRouter)` schickt alles, was mit `/api/books` beginnt, an den Router.
+2. **`express.json()`:** liest den Body-Text und macht daraus ein Objekt in `request.body`. Ist der Text kein gültiges JSON, bricht es hier mit einem Fehler ab. Dann übernimmt der Fehler-Handler (Fall B).
+3. **Router:** Die Methode `POST` und der Pfad `/` passen auf `booksRouter.post("/", ...)`.
+4. **Validierung:** `validateBookInput(request.body)` gibt `{ ok: true, value }` oder `{ ok: false, error }` zurück.
+5. **Fehler?** Dann `response.status(400).json({ error })` und `return`. Der Store wird nicht erreicht.
+6. **Gültig?** `booksStore.create(result.value)` legt das Buch an. Dann `201` mit dem neuen Buch.
+
+### Fall A: Zahl statt Text
+
+```
+POST /api/books
+{ "title": 5, "author": "Frank Herbert" }
+```
+→ **`400 Bad Request`** `{"error":"title must be a non-empty text"}`
+
+Was passiert: Der Body ist ein Objekt (Prüfung 1 bestanden). Bei `title` ist `typeof 5` aber `"number"`, nicht `"string"`. Die Prüfung schlägt an, und die Funktion gibt die Meldung zurück. `author` wird gar nicht mehr geprüft: Es gewinnt der **erste** Fehler.
+
+Hätte der Code nur `if (title)` geprüft, wäre `5` durchgegangen, denn `5` ist "wahr".
+
+### Fall B: kaputtes JSON
+
+```
+POST /api/books
+{"title":
+```
+→ **`400 Bad Request`** `{"error":"Body must be valid JSON"}`
+
+Was passiert: Hier kommt die Anfrage **nie** beim Router an. `express.json()` kann den Text nicht lesen und wirft einen Fehler. Express springt über alle Routen direkt zum **Fehler-Handler** in `middleware/errors.ts`. Der erkennt `type === "entity.parse.failed"` und antwortet mit 400.
+
+Der Client hat es verbockt, also 4xx. Der Server hat keinen Fehler, also kein 500.
+
+### Fall C: gültig, mit fremder `id`
+
+```
+POST /api/books
+{ "title": "  Dune  ", "author": "Frank Herbert", "id": "hacked", "extra": 1 }
+```
+→ **`201 Created`**
+```json
+{ "id": "878d493e-2214-4671-af06-2d7fc8f20392", "title": "Dune", "author": "Frank Herbert",
+  "status": "want-to-read", "rating": null, "notes": "" }
+```
+
+Was man sieht:
+- **Die `id` des Clients wird ignoriert.** Die Funktion baut ein **neues** Objekt nur aus `title`, `author`, `status`, `rating`, `notes`. `id` und `extra` werden gar nicht erst kopiert. Der Store erzeugt eine eigene `id` (UUID).
+- **`trim()`:** Aus `"  Dune  "` wird `"Dune"`.
+- **Standardwerte:** `status`, `rating` und `notes` fehlten im Body. Die Funktion setzt `"want-to-read"`, `null` und `""`.
+
+### Was dich das lehrt
+
+| Beobachtung | Regel |
+| ----------- | ----- |
+| Fall A | Den **Typ** prüfen, nicht nur "ist da". |
+| Fall B | Fehler können **vor** deinem Code passieren. Darum gibt es den Fehler-Handler. |
+| Fall C | Nie `request.body` speichern. Ein **neues** Objekt aus bekannten Feldern bauen. |
+| alle drei | Immer erst prüfen (400), dann speichern (201). Ein ungültiger Body ändert nie etwas. |
+
+### So prüfst du es selbst
+
+Das geht ohne Code-Kenntnisse und ist die beste Kontrolle für den Agenten: eine Anfrage schicken und die **Antwort** lesen.
+
+```bash
+curl -i -X POST -H "Content-Type: application/json" \
+  -d '{"title":5,"author":"Frank Herbert"}' http://localhost:3001/api/books
+```
+
+Auf diese drei Dinge achten:
+1. **Statuscode:** 4xx bei falscher Eingabe, nie 500.
+2. **Form:** immer `{ "error": "..." }`.
+3. **Keine Interna:** kein Stack-Trace, keine Dateipfade.
+
+Dasselbe geht im Bruno-Ordner `bruno/` (die Anfragen `07`, `08` und `09` sind genau solche Fälle).
+
+**Merksatz:** *Du musst nicht jede Zeile Code verstehen. Schick dem Server eine falsche Anfrage und lies, was zurückkommt.*
+
+---
+
 ## Spickzettel: alle Merksätze
 
 1. GET liest, POST legt neu an, PUT ersetzt, DELETE löscht.
