@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { isStatus, validateBookInput } from "./validation";
+import { isStatus, validateBookInput, validateListOptions } from "./validation";
 
 const valid = { title: "Dune", author: "Frank Herbert" };
 
@@ -165,5 +165,65 @@ describe("isStatus", () => {
     expect(isStatus("finished")).toBe(false);
     expect(isStatus(undefined)).toBe(false);
     expect(isStatus(["done"])).toBe(false);
+  });
+});
+
+describe("validateListOptions", () => {
+  test("accepts no options and defaults the offset to 0", () => {
+    expect(validateListOptions({})).toEqual({
+      ok: true,
+      value: { sort: undefined, limit: undefined, offset: 0 },
+    });
+  });
+
+  test("accepts sort, limit and offset", () => {
+    expect(validateListOptions({ sort: "title", limit: "10", offset: "20" })).toEqual({
+      ok: true,
+      value: { sort: "title", limit: 10, offset: 20 },
+    });
+  });
+
+  test.each(["1", "100"])("accepts the limit %s", (limit) => {
+    expect(validateListOptions({ limit }).ok).toBe(true);
+  });
+
+  test.each([
+    ["zero", "0"],
+    ["above the maximum", "101"],
+    ["a text", "abc"],
+    ["negative", "-1"],
+    ["a decimal", "1.5"],
+    ["an exponent", "1e2"],
+    ["empty", ""],
+    ["a repeated key", ["1", "2"]],
+    ["an object", { a: "1" }],
+  ])("rejects a limit that is %s", (_name, limit) => {
+    expect(validateListOptions({ limit })).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/^limit /),
+    });
+  });
+
+  test.each([
+    ["negative", "-1"],
+    ["a text", "abc"],
+    ["a decimal", "0.5"],
+    ["a repeated key", ["1", "2"]],
+  ])("rejects an offset that is %s", (_name, offset) => {
+    expect(validateListOptions({ offset })).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/^offset /),
+    });
+  });
+
+  test.each([
+    ["an unknown field", "author"],
+    ["other casing", "Title"],
+    ["a repeated key", ["title", "title"]],
+  ])("rejects a sort that is %s", (_name, sort) => {
+    expect(validateListOptions({ sort })).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/^sort /),
+    });
   });
 });
