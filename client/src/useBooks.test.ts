@@ -1,68 +1,137 @@
-import { act, renderHook } from "@testing-library/react";
-import { describe, expect, test } from "vitest";
+import { act, renderHook, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 
-import { STORAGE_KEY, useBooks } from "./useBooks";
+import * as api from "./api";
+import type { Book, NewBook } from "./types";
+import { useBooks } from "./useBooks";
 
-const newBook = {
+vi.mock("./api");
+
+const dune: Book = {
+  id: "b1",
+  title: "Dune",
+  author: "Frank Herbert",
+  status: "reading",
+  rating: 4,
+  notes: "Slow start",
+};
+const emma: Book = { ...dune, id: "b2", title: "Emma", author: "Jane Austen" };
+
+const piranesi: NewBook = {
   title: "Piranesi",
   author: "Susanna Clarke",
-  status: "want-to-read" as const,
+  status: "want-to-read",
   rating: null,
   notes: "",
 };
 
+beforeEach(() => {
+  vi.resetAllMocks();
+  vi.mocked(api.listBooks).mockResolvedValue([dune, emma]);
+});
+
+async function loaded() {
+  const hook = renderHook(() => useBooks());
+  await waitFor(() => expect(hook.result.current.loading).toBe(false));
+  return hook;
+}
+
 describe("useBooks", () => {
-  test("starts with the seed data", () => {
+  test("is loading first, then has the books of the API", async () => {
     const { result } = renderHook(() => useBooks());
-    expect(result.current.books).toHaveLength(10);
+    expect(result.current.loading).toBe(true);
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.books).toEqual([dune, emma]);
+    expect(result.current.error).toBeNull();
+    expect(api.listBooks).toHaveBeenCalledWith("all");
   });
 
-  test("adds a book at the top and gives it an id", () => {
-    const { result } = renderHook(() => useBooks());
-    act(() => {
-      result.current.addBook(newBook);
-    });
-    expect(result.current.books).toHaveLength(11);
-    expect(result.current.books[0]).toMatchObject(newBook);
-    expect(result.current.books[0].id).toBeTruthy();
+  test("shows the error when the books cannot be loaded", async () => {
+    vi.mocked(api.listBooks).mockRejectedValue(
+      new Error("Cannot reach the server")
+    );
+    const { result } = await loaded();
+    expect(result.current.error).toBe("Cannot reach the server");
+    expect(result.current.books).toEqual([]);
   });
 
-  test("updates only the given fields of one book", () => {
-    const { result } = renderHook(() => useBooks());
-    act(() => {
-      result.current.updateBook("b3", { status: "reading", rating: 4 });
+  test("loads again with the status when the filter changes", async () => {
+    const { result } = await loaded();
+    vi.mocked(api.listBooks).mockResolvedValue([emma]);
+    act(() => result.current.setStatus("done"));
+    await waitFor(() => expect(result.current.books).toEqual([emma]));
+    expect(api.listBooks).toHaveBeenLastCalledWith("done");
+  });
+
+  test("adds a book and loads the list again", async () => {
+    const { result } = await loaded();
+    const created: Book = { ...piranesi, id: "b3" };
+    vi.mocked(api.createBook).mockResolvedValue(created);
+    vi.mocked(api.listBooks).mockResolvedValue([dune, emma, created]);
+
+    let ok = false;
+    await act(async () => {
+      ok = await result.current.addBook(piranesi);
     });
-    const book = result.current.books.find((b) => b.id === "b3");
-    expect(book).toMatchObject({
-      title: "Gone Girl",
-      status: "reading",
+
+    expect(ok).toBe(true);
+    expect(api.createBook).toHaveBeenCalledWith(piranesi);
+    await waitFor(() => expect(result.current.books).toHaveLength(3));
+  });
+
+  test("replaces the whole book with the changes merged in", async () => {
+    const { result } = await loaded();
+    vi.mocked(api.replaceBook).mockResolvedValue({ ...dune, status: "done" });
+
+    await act(async () => {
+      await result.current.updateBook("b1", { status: "done" });
+    });
+
+    expect(api.replaceBook).toHaveBeenCalledWith("b1", {
+      title: "Dune",
+      author: "Frank Herbert",
+      status: "done",
       rating: 4,
+      notes: "Slow start",
     });
   });
 
-  test("deletes a book", () => {
-    const { result } = renderHook(() => useBooks());
-    act(() => {
-      result.current.deleteBook("b1");
+  test("deletes a book and loads the list again", async () => {
+    const { result } = await loaded();
+    vi.mocked(api.deleteBook).mockResolvedValue(undefined);
+    vi.mocked(api.listBooks).mockResolvedValue([emma]);
+
+    await act(async () => {
+      await result.current.deleteBook("b1");
     });
-    expect(result.current.books).toHaveLength(9);
-    expect(result.current.books.some((b) => b.id === "b1")).toBe(false);
+
+    expect(api.deleteBook).toHaveBeenCalledWith("b1");
+    await waitFor(() => expect(result.current.books).toEqual([emma]));
   });
 
-  test("keeps the books after a reload", () => {
-    const first = renderHook(() => useBooks());
-    act(() => {
-      first.result.current.deleteBook("b1");
-    });
-    first.unmount();
+  test("shows the error of a failed write and does not reload", async () => {
+    const { result } = await loaded();
+    vi.mocked(api.createBook).mockRejectedValue(
+      new Error("author must be a non-empty text")
+    );
+    const calls = vi.mocked(api.listBooks).mock.calls.length;
 
-    const second = renderHook(() => useBooks());
-    expect(second.result.current.books).toHaveLength(9);
+    let ok = true;
+    await act(async () => {
+      ok = await result.current.addBook({ ...piranesi, author: "" });
+    });
+
+    expect(ok).toBe(false);
+    expect(result.current.error).toBe("author must be a non-empty text");
+    expect(api.listBooks).toHaveBeenCalledTimes(calls);
   });
 
-  test("falls back to the seed data when the storage is broken", () => {
-    localStorage.setItem(STORAGE_KEY, "{not json");
-    const { result } = renderHook(() => useBooks());
-    expect(result.current.books).toHaveLength(10);
+  test("does not call the API for a book that is not in the list", async () => {
+    const { result } = await loaded();
+    await act(async () => {
+      await result.current.updateBook("nope", { status: "done" });
+    });
+    expect(api.replaceBook).not.toHaveBeenCalled();
+    expect(result.current.error).toBe("Book not found");
   });
 });

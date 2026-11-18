@@ -357,6 +357,27 @@ Ein einfaches `GET` braucht keinen Preflight.
 
 ---
 
+## Bonus: React-Client
+
+Die App in `client/` nutzt jetzt die API statt `localStorage`.
+
+| Datei | Aufgabe |
+| ----- | ------- |
+| `client/src/api.ts` | **alle** `fetch`-Aufrufe: `listBooks`, `createBook`, `replaceBook` (PUT), `deleteBook` |
+| `client/src/useBooks.ts` | Zustand: `books`, `loading`, `error`, Status-Filter. Lädt neu, wenn sich Filter oder Server ändern |
+| `client/src/App.tsx` | zeigt nur an und ruft die Funktionen des Hooks auf |
+
+- **Fehlermeldungen:** `api.ts` wirft immer einen `Error` mit Text. Ist die Antwort nicht in Ordnung, ist der Text das `error` der API (`"title must be a non-empty text"`). Ist der Server nicht erreichbar, schlägt `fetch` selbst fehl (`TypeError`), und der Text lautet "Cannot reach the server …". Ist der Body kein `{ "error": ... }`, steht dort "Request failed (502)".
+- **`fetch` wirft nicht bei 404 oder 400.** Nur bei Netzwerkfehlern. Darum prüft `send` selbst `response.ok`.
+- **Nach jeder Änderung neu laden.** Der Hook zählt `version` hoch, der Effekt lädt die Liste vom Server. So zeigt die App den Stand des Servers, nicht eine Vermutung.
+- **Veraltete Antworten:** wechselt der Filter, während noch geladen wird, ignoriert der Effekt die alte Antwort (`ignore`-Flag im Cleanup).
+- **`PUT` braucht alle Felder.** "Als gelesen markieren" holt darum das Buch aus der Liste und schickt es mit `status: "done"` zurück. Mit `PATCH` wäre ein Feld genug.
+- **Tests rufen nie den echten Server.** `api.test.ts` ersetzt `fetch`, `useBooks.test.ts` und `App.test.tsx` ersetzen das ganze Modul `./api` (`vi.mock`).
+
+**Merksatz:** *`fetch` meldet nur kaputte Verbindungen als Fehler. Einen 4xx oder 5xx muss man selbst an `response.ok` erkennen.*
+
+---
+
 ## Spickzettel: alle Merksätze
 
 1. GET liest, POST legt neu an, PUT ersetzt, DELETE löscht.
@@ -420,5 +441,5 @@ Versuche zuerst, selbst zu antworten. Die Antworten stehen unten.
   - **Doppelte Bücher** (gleicher Titel und Autor) sind erlaubt.
 
   **Merksatz:** *Ein Test prüft nur, woran der Autor gedacht hat. Die Lücken stehen dort, wo es auch keine Regel gibt.*
-- **Bonus-Aufgaben:** CORS und React-Client. Sortieren, Paging und `PATCH` sind gebaut (siehe oben).
+- **Bonus-Aufgaben:** CORS, React-Client, Sortieren, Paging und `PATCH` sind gebaut (siehe oben). Der Client wurde noch nicht von Hand im Browser ausprobiert.
 - **Daten gehen beim Neustart verloren**, weil sie nur im Arbeitsspeicher liegen. Eine Datenbank würde das lösen, und genau dafür gibt es das `BooksStore`-Interface.
