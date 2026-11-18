@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 
-import { isStatus, validateBookInput, validateListOptions } from "./validation";
+import {
+  isStatus,
+  validateBookInput,
+  validateBookPatch,
+  validateListOptions,
+} from "./validation";
 
 const valid = { title: "Dune", author: "Frank Herbert" };
 
@@ -225,5 +230,80 @@ describe("validateListOptions", () => {
       ok: false,
       error: expect.stringMatching(/^sort /),
     });
+  });
+});
+
+describe("validateBookPatch", () => {
+  test.each([
+    ["null", null],
+    ["a list", [{ title: "Dune" }]],
+    ["a text", "Dune"],
+  ])("rejects a body that is %s", (_name, body) => {
+    expect(validateBookPatch(body)).toEqual({
+      ok: false,
+      error: "Body must be a JSON object",
+    });
+  });
+
+  test.each([
+    ["an empty object", {}],
+    ["only unknown fields", { id: "x", extra: 1 }],
+  ])("rejects %s", (_name, body) => {
+    expect(validateBookPatch(body)).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(/^Body must contain at least one of/),
+    });
+  });
+
+  test("copies only the fields that are present, without defaults", () => {
+    expect(validateBookPatch({ status: "done", id: "x" })).toEqual({
+      ok: true,
+      value: { status: "done" },
+    });
+  });
+
+  test("trims title and author", () => {
+    expect(validateBookPatch({ title: " Dune ", author: " F. H. " })).toEqual({
+      ok: true,
+      value: { title: "Dune", author: "F. H." },
+    });
+  });
+
+  test("lets rating be set to null to clear it", () => {
+    expect(validateBookPatch({ rating: null })).toEqual({
+      ok: true,
+      value: { rating: null },
+    });
+  });
+
+  test("lets notes be set to an empty text", () => {
+    expect(validateBookPatch({ notes: "" })).toEqual({
+      ok: true,
+      value: { notes: "" },
+    });
+  });
+
+  test.each([
+    ["title", { title: "  " }, /^title /],
+    ["title", { title: 5 }, /^title /],
+    ["title", { title: null }, /^title /],
+    ["author", { author: "" }, /^author /],
+    ["status", { status: null }, /^status /],
+    ["status", { status: "finished" }, /^status /],
+    ["rating", { rating: "4" }, /^rating /],
+    ["rating", { rating: 6 }, /^rating /],
+    ["notes", { notes: null }, /^notes /],
+    ["notes", { notes: 7 }, /^notes /],
+  ])("rejects an invalid %s: %j", (_name, body, message) => {
+    expect(validateBookPatch(body)).toMatchObject({
+      ok: false,
+      error: expect.stringMatching(message),
+    });
+  });
+
+  test("uses the same message as validateBookInput", () => {
+    expect(errorOf({ ...valid, rating: 9 })).toBe(
+      (validateBookPatch({ rating: 9 }) as { error: string }).error
+    );
   });
 });

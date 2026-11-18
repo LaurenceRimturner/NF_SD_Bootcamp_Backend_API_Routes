@@ -286,6 +286,52 @@ In Express 5 gehen Fehler aus `async`-Handlern automatisch hierhin. Darum gibt e
 
 ---
 
+## Bonus: Sortieren und Paging
+
+`GET /api/books?sort=title&limit=10&offset=20`
+
+- `sort`: nur `title` (ohne Beachtung von Groß- und Kleinschreibung). Ohne `sort` bleibt die Reihenfolge des Stores.
+- `limit`: ganze Zahl von 1 bis 100. Ohne `limit` kommen alle Bücher.
+- `offset`: ganze Zahl ab 0, Standard 0. Ein `offset` hinter dem Ende gibt `200 []`, keinen Fehler.
+- Ungültig (`?limit=abc`, `-1`, `1.5`, `1e2`, `?limit=1&limit=2`, `?sort=author`) ist ein `400`.
+
+Das `BooksStore`-Interface darf sich nicht ändern. Darum sortiert und schneidet die **Route** das Ergebnis von `booksStore.list(...)`. Die Prüfung steht in `validateListOptions` (`src/validation.ts`).
+
+### Warum nur Ziffern?
+Query-Werte sind immer Text. `Number("abc")` ist `NaN`, `Number("1e2")` ist `100`, `Number("")` ist `0`. Darum prüft `toWholeNumber` mit `/^\d{1,9}$/`, bevor es umwandelt.
+
+**Merksatz:** *Query-Werte sind Text. Erst prüfen, dann in eine Zahl umwandeln, nie umgekehrt.*
+
+Bei einer Datenbank würde man `ORDER BY`, `LIMIT` und `OFFSET` im Store ausführen, sonst wird jedes Mal die ganze Liste geladen.
+
+## Bonus: PATCH
+
+`PATCH /api/books/:id` ändert nur die Felder im Body, zum Beispiel `{ "status": "done" }`.
+
+| | `PUT` | `PATCH` |
+| - | ----- | ------- |
+| Body | alle Pflichtfelder (`title`, `author`) | nur das, was sich ändert |
+| Fehlende Felder | werden auf den Standard gesetzt | bleiben, wie sie sind |
+| Leerer Body | `400` (`title` fehlt) | `400` (mindestens ein Feld nötig) |
+| Erfolg | 200 | 200 |
+| Unbekannte `id` | 404 | 404 |
+
+- **Dieselben Regeln wie `PUT`.** Jedes Feld hat eine eigene Prüfung (`titleError`, `statusError`, ...), die `POST`, `PUT` und `PATCH` teilen. So laufen die Regeln nicht auseinander.
+- **Nur vorhandene Felder.** `rating: null` ist erlaubt und löscht die Bewertung. `status: null` ist ungültig.
+- **Ablauf:** prüfen (400), `booksStore.get` (404), zusammenführen, `booksStore.replace`. Die Route redet weiter nur mit dem Store.
+- **Ein Nachteil:** `get` und `replace` sind zwei Schritte. Im Speicher ist das sicher, bei einer Datenbank könnten zwei Anfragen sich überschreiben. Dann bräuchte der Store eine eigene `patch`-Funktion.
+
+### Wann ist PATCH besser als PUT?
+- Der Client ändert **ein Feld** (Buch als gelesen markieren) und kennt den Rest nicht oder will ihn nicht schicken.
+- Ein **veralteter Stand** soll keine Felder überschreiben, die jemand anderes inzwischen geändert hat. `PUT` schickt alles zurück.
+- Große Objekte: weniger Daten pro Anfrage.
+
+`PUT` ist besser, wenn der Client das **ganze Buch** hat und es bewusst ersetzen will (ein Formular "Speichern").
+
+**Merksatz:** *PUT ersetzt alles, PATCH ändert nur, was im Body steht.*
+
+---
+
 ## Spickzettel: alle Merksätze
 
 1. GET liest, POST legt neu an, PUT ersetzt, DELETE löscht.
@@ -349,5 +395,5 @@ Versuche zuerst, selbst zu antworten. Die Antworten stehen unten.
   - **Doppelte Bücher** (gleicher Titel und Autor) sind erlaubt.
 
   **Merksatz:** *Ein Test prüft nur, woran der Autor gedacht hat. Die Lücken stehen dort, wo es auch keine Regel gibt.*
-- **Bonus-Aufgaben:** CORS und React-Client, Sortieren und Paging (`?sort=`, `?limit=`, `?offset=`), `PATCH`.
+- **Bonus-Aufgaben:** CORS und React-Client. Sortieren, Paging und `PATCH` sind gebaut (siehe oben).
 - **Daten gehen beim Neustart verloren**, weil sie nur im Arbeitsspeicher liegen. Eine Datenbank würde das lösen, und genau dafür gibt es das `BooksStore`-Interface.

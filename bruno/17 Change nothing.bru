@@ -1,0 +1,19 @@
+meta {
+  name: Change nothing
+  type: http
+  seq: 17
+}
+
+patch {
+  url: {{baseUrl}}/api/books/b1
+  body: json
+  auth: none
+}
+
+body:json {
+  {}
+}
+
+assert {
+  res.status: eq 400
+}

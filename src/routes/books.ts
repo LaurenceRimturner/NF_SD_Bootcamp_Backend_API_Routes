@@ -2,7 +2,12 @@ import { Router } from "express";
 
 import { booksStore } from "../store/booksStore";
 import { STATUSES } from "../types";
-import { isStatus, validateBookInput, validateListOptions } from "../validation";
+import {
+  isStatus,
+  validateBookInput,
+  validateBookPatch,
+  validateListOptions,
+} from "../validation";
 
 export const booksRouter = Router();
 
@@ -76,6 +81,35 @@ booksRouter.put("/:id", async (request, response) => {
   }
 
   const book = await booksStore.replace(request.params.id, result.value);
+
+  if (book === undefined) {
+    response.status(404).json({ error: "Book not found" });
+    return;
+  }
+
+  response.json(book);
+});
+
+booksRouter.patch("/:id", async (request, response) => {
+  const result = validateBookPatch(request.body);
+
+  if (!result.ok) {
+    response.status(400).json({ error: result.error });
+    return;
+  }
+
+  const current = await booksStore.get(request.params.id);
+
+  if (current === undefined) {
+    response.status(404).json({ error: "Book not found" });
+    return;
+  }
+
+  const { id: _id, ...editable } = current;
+  const book = await booksStore.replace(request.params.id, {
+    ...editable,
+    ...result.value,
+  });
 
   if (book === undefined) {
     response.status(404).json({ error: "Book not found" });

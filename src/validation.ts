@@ -18,39 +18,110 @@ export function validateBookInput(body: unknown): ValidationResult {
     unknown
   >;
 
-  if (typeof title !== "string" || title.trim() === "") {
-    return { ok: false, error: "title must be a non-empty text" };
-  }
-
-  if (typeof author !== "string" || author.trim() === "") {
-    return { ok: false, error: "author must be a non-empty text" };
-  }
-
-  if (status !== undefined && !isStatus(status)) {
-    return {
-      ok: false,
-      error: `status must be one of: ${STATUSES.join(", ")}`,
-    };
-  }
-
-  if (rating !== undefined && rating !== null && !isRating(rating)) {
-    return { ok: false, error: "rating must be null or an integer from 1 to 5" };
-  }
-
-  if (notes !== undefined && typeof notes !== "string") {
-    return { ok: false, error: "notes must be a text" };
+  const error =
+    titleError(title) ??
+    authorError(author) ??
+    (status === undefined ? undefined : statusError(status)) ??
+    (rating === undefined ? undefined : ratingError(rating)) ??
+    (notes === undefined ? undefined : notesError(notes));
+  if (error !== undefined) {
+    return { ok: false, error };
   }
 
   return {
     ok: true,
     value: {
-      title: title.trim(),
-      author: author.trim(),
-      status: status ?? "want-to-read",
-      rating: rating ?? null,
-      notes: notes ?? "",
+      title: (title as string).trim(),
+      author: (author as string).trim(),
+      status: (status as Status | undefined) ?? "want-to-read",
+      rating: (rating as number | null | undefined) ?? null,
+      notes: (notes as string | undefined) ?? "",
     },
   };
+}
+
+export type PatchResult =
+  | { ok: true; value: Partial<NewBook> }
+  | { ok: false; error: string };
+
+/**
+ * Checks a request body for PATCH. Only the fields that are present are checked and
+ * copied, with the same rules as `validateBookInput`. At least one field is required.
+ */
+export function validateBookPatch(body: unknown): PatchResult {
+  if (typeof body !== "object" || body === null || Array.isArray(body)) {
+    return { ok: false, error: "Body must be a JSON object" };
+  }
+
+  const { title, author, status, rating, notes } = body as Record<
+    string,
+    unknown
+  >;
+  const value: Partial<NewBook> = {};
+
+  if (title !== undefined) {
+    const error = titleError(title);
+    if (error !== undefined) return { ok: false, error };
+    value.title = (title as string).trim();
+  }
+  if (author !== undefined) {
+    const error = authorError(author);
+    if (error !== undefined) return { ok: false, error };
+    value.author = (author as string).trim();
+  }
+  if (status !== undefined) {
+    const error = statusError(status);
+    if (error !== undefined) return { ok: false, error };
+    value.status = status as Status;
+  }
+  if (rating !== undefined) {
+    const error = ratingError(rating);
+    if (error !== undefined) return { ok: false, error };
+    value.rating = rating as number | null;
+  }
+  if (notes !== undefined) {
+    const error = notesError(notes);
+    if (error !== undefined) return { ok: false, error };
+    value.notes = notes as string;
+  }
+
+  if (Object.keys(value).length === 0) {
+    return {
+      ok: false,
+      error: "Body must contain at least one of: title, author, status, rating, notes",
+    };
+  }
+
+  return { ok: true, value };
+}
+
+// One rule per field, shared by POST, PUT and PATCH. They return the message or `undefined`.
+function titleError(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() !== ""
+    ? undefined
+    : "title must be a non-empty text";
+}
+
+function authorError(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() !== ""
+    ? undefined
+    : "author must be a non-empty text";
+}
+
+function statusError(value: unknown): string | undefined {
+  return isStatus(value)
+    ? undefined
+    : `status must be one of: ${STATUSES.join(", ")}`;
+}
+
+function ratingError(value: unknown): string | undefined {
+  return value === null || isRating(value)
+    ? undefined
+    : "rating must be null or an integer from 1 to 5";
+}
+
+function notesError(value: unknown): string | undefined {
+  return typeof value === "string" ? undefined : "notes must be a text";
 }
 
 export function isStatus(value: unknown): value is Status {
