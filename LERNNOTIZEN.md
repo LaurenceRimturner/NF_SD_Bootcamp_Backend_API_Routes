@@ -378,6 +378,52 @@ Die App in `client/` nutzt jetzt die API statt `localStorage`.
 
 ---
 
+## Bonus: Namen und Statuscodes
+
+Eine Regel für alle Fälle:
+
+| Code | Wann |
+| ---- | ---- |
+| 200 | gelesen oder geändert, Antwort mit Body |
+| 201 | neu angelegt |
+| 204 | geklappt, kein Body nötig (löschen) |
+| 400 | Die Eingabe ist **für sich allein** ungültig (Form, Typ, Wertebereich) |
+| 404 | Das Ziel (Buch oder Route) **gibt es nicht** |
+| 409 | Die Eingabe ist gültig, **passt aber nicht zum Stand der Daten** |
+| 500 | Fehler im Server |
+
+Die Pfade sind Nomen im Plural (`/api/books`), die Aktion steht in der Methode, nicht im Pfad. Darum **kein** `POST /api/books/42/finish`.
+
+### A. Der Leser markiert ein Buch als gelesen
+- **`PATCH /api/books/:id`** mit `{ "status": "done" }`, Erfolg **200** mit dem Buch.
+- Fehler: **404** (unbekannte `id`), **400** (z. B. `"status": "finished"`).
+- Grund: Es ändert **ein Feld** eines vorhandenen Buchs. Das ist genau der Fall von `PATCH` (gebaut). `PUT` ginge auch, müsste aber alle Felder schicken.
+
+### B. Der Leser fügt ein Buch hinzu, das schon in der Liste steht (gleicher Titel und Autor)
+- **`POST /api/books`**, Erfolg **201**.
+- Fehler: **409** `{ "error": "Book already on the list" }`. Bei fehlendem Titel weiter **400**.
+- Grund: Der Body ist gültig (also nicht 400), aber er steht im Konflikt mit dem Stand der Daten. Genau dafür ist 409 da.
+- Noch nicht gebaut. Der Store hat keine Suche nach Titel und Autor, und sein Interface darf sich nicht ändern. Die Route könnte `list({ q })` aufrufen und den Autor vergleichen, aber zwei gleichzeitige Anfragen könnten sich überholen. In einer Datenbank löst das ein `UNIQUE`-Index.
+
+### C. Der Leser sucht Bücher nach Autor
+- **`GET /api/books?author=herbert`**, Erfolg **200** mit einer Liste.
+- Fehler: **400**, wenn `author` kein einzelner Text ist (`?author=a&author=b`). Kein Treffer ist **200 mit `[]`**, kein 404.
+- Grund: Filter gehören in die Query, wie `status` und `q`. Die Sammlung `/api/books` gibt es ja, sie ist nur leer.
+
+### D. Der Client löscht ein Buch, das schon gelöscht ist
+- **`DELETE /api/books/:id`**, beim zweiten Mal **404** `{ "error": "Book not found" }`.
+- Grund: Dieselbe Regel wie bei `GET` und `PUT`: Gibt es das Ziel nicht, ist es 404. So erfährt der Client, dass nichts gelöscht wurde (zum Beispiel ein Tippfehler in der `id`).
+- Die Gegenmeinung: `204` jedes Mal, weil das **Ergebnis** gleich ist (das Buch ist weg). Beide Wege sind in Ordnung, wichtig ist, dass man **eine** Regel wählt. Dieses Projekt hat sie im Vertrag festgelegt: 404.
+
+### E. Der Client sendet ein `rating` von 7
+- **`POST`, `PUT` oder `PATCH`**, Antwort **400** `{ "error": "rating must be null or an integer from 1 to 5" }`.
+- Grund: Der Wert ist ungültig, egal wie der Stand der Daten ist. Das ist die Definition von 400.
+- Warum nicht **422**? Das ginge auch ("die Syntax stimmt, der Inhalt nicht"). Der Vertrag nutzt aber für jede ungültige Eingabe 400. Eine Regel ist besser als zwei, die man unterscheiden muss.
+
+**Merksatz:** *400: die Eingabe ist falsch. 404: das Ziel fehlt. 409: die Eingabe ist richtig, aber der Stand der Daten verbietet sie.*
+
+---
+
 ## Spickzettel: alle Merksätze
 
 1. GET liest, POST legt neu an, PUT ersetzt, DELETE löscht.
@@ -442,4 +488,5 @@ Versuche zuerst, selbst zu antworten. Die Antworten stehen unten.
 
   **Merksatz:** *Ein Test prüft nur, woran der Autor gedacht hat. Die Lücken stehen dort, wo es auch keine Regel gibt.*
 - **Bonus-Aufgaben:** CORS, React-Client, Sortieren, Paging und `PATCH` sind gebaut (siehe oben). Der Client wurde noch nicht von Hand im Browser ausprobiert.
+- **409 für doppelte Bücher** steht nur als Idee in "Namen und Statuscodes", gebaut ist es nicht.
 - **Daten gehen beim Neustart verloren**, weil sie nur im Arbeitsspeicher liegen. Eine Datenbank würde das lösen, und genau dafür gibt es das `BooksStore`-Interface.
