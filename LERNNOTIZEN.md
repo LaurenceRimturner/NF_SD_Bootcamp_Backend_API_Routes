@@ -332,6 +332,31 @@ Bei einer Datenbank würde man `ORDER BY`, `LIMIT` und `OFFSET` im Store ausfüh
 
 ---
 
+## Bonus: CORS
+
+### Das Problem
+Die React-App läuft auf `http://localhost:3000`, die API auf `http://localhost:3001`. Für den Browser sind das zwei verschiedene **Origins** (Protokoll + Host + Port). Ruft die Seite die andere Origin auf, liest der Browser die Antwort nur, wenn der Server es mit dem Header `Access-Control-Allow-Origin` erlaubt. Sonst steht in der Konsole "blocked by CORS policy", obwohl der Server mit 200 geantwortet hat.
+
+### Die Lösung (`src/app.ts`)
+```ts
+app.use(cors({ origin: "http://localhost:3000" }));   // zuerst
+app.use(express.json());
+```
+`cors()` ohne Optionen würde **jede** Origin erlauben. Darum steht die Origin der React-App fest dabei. Nur das Paket `cors` (und `@types/cors`) kam neu dazu.
+
+### Der Preflight
+Ein `POST`, `PUT`, `PATCH` oder `DELETE` mit `Content-Type: application/json` ist keine "einfache" Anfrage. Der Browser schickt vorher eine `OPTIONS`-Anfrage und fragt: "Darf diese Origin diese Methode mit diesem Header benutzen?" Der Server antwortet `204` mit `Access-Control-Allow-Methods` und `Access-Control-Allow-Headers`. Erst danach sendet der Browser die eigentliche Anfrage.
+
+Ein einfaches `GET` braucht keinen Preflight.
+
+### Was CORS nicht ist
+- Der Server schickt bei einer festen Origin an **jeden** Aufrufer denselben `Access-Control-Allow-Origin: http://localhost:3000`. Er lehnt keinen ab. Der **Browser** vergleicht den Header mit der eigenen Origin und blockiert die fremde Seite.
+- `curl` oder ein anderer Server ignoriert CORS. Es ist **kein Schutz** der API, nur eine Regel für Browser.
+
+**Merksatz:** *CORS erlaubt dem Browser, die Antwort einer anderen Origin zu lesen. Die Origin der eigenen App eintragen, nie alle.*
+
+---
+
 ## Spickzettel: alle Merksätze
 
 1. GET liest, POST legt neu an, PUT ersetzt, DELETE löscht.
