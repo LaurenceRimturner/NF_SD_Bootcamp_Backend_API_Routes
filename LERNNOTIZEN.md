@@ -342,6 +342,12 @@ Versuche zuerst, selbst zu antworten. Die Antworten stehen unten.
 
 - **Review: was `npm run check` nicht gefunden hat.** Ein Body über 100 KB (`POST` mit 200 KB) und eine kaputte URL (`/api/books/%E0%A4%A`) wurden mit 500 beantwortet, obwohl der Client schuld ist. Das Script prüft nur den Vertrag, nicht diese Fälle. Behoben im `errorHandler`: Fehler mit 4xx-`status` werden als 413 bzw. 400 mit allgemeiner Meldung gesendet, alles andere bleibt 500.
   **Merksatz:** *Ein Check-Script findet nur, woran der Autor gedacht hat. Eigene Fälle ausprobieren (zu groß, kaputt, fremd).*
-- **Keine eigenen Unit-Tests für `validation.ts`.** Das ist der Bonus mit Vitest.
+- **Unit-Tests für `validation.ts`** stehen in `src/validation.test.ts` (51 Tests, Vitest). Was sie **nicht** abdecken:
+  - **Keine Höchstlänge.** `title`, `author` und `notes` dürfen beliebig lang sein (bis zum Body-Limit von 100 KB). Dafür gibt es keine Regel, also auch keinen Test. Das ist eine echte Lücke der Validierung.
+  - **Unicode-Leerzeichen** (geschütztes Leerzeichen, Zeichen ohne Breite): `trim()` entfernt manche, andere nicht.
+  - **Ein Body mit dem Schlüssel `__proto__`.** Vermutlich harmlos, weil die Felder einzeln nach Namen kopiert werden, aber nicht getestet.
+  - **Doppelte Bücher** (gleicher Titel und Autor) sind erlaubt.
+
+  **Merksatz:** *Ein Test prüft nur, woran der Autor gedacht hat. Die Lücken stehen dort, wo es auch keine Regel gibt.*
 - **Bonus-Aufgaben:** CORS und React-Client, Sortieren und Paging (`?sort=`, `?limit=`, `?offset=`), `PATCH`.
 - **Daten gehen beim Neustart verloren**, weil sie nur im Arbeitsspeicher liegen. Eine Datenbank würde das lösen, und genau dafür gibt es das `BooksStore`-Interface.
